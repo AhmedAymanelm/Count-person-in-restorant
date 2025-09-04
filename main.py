@@ -1,31 +1,29 @@
 import cv2
 import random
-import csv
-import os
 from ultralytics import YOLO
 from deep_sort_realtime.deepsort_tracker import DeepSort
 
 # -----------------------------
-# Load YOLO model
+# Download YOLO
 # -----------------------------
 print("Loading YOLO model...")
 model = YOLO("yolo11x.pt")
 print("Model loaded!")
 
 # -----------------------------
-# DeepSORT + Re-ID
+#  DeepSORT + Re-ID
 # -----------------------------
 tracker = DeepSort(
-    max_age=200,
+    max_age=100,
     n_init=3,
-    max_iou_distance=0.6,
+    max_iou_distance=0.7,
     embedder="torchreid",
     embedder_model_name="osnet_x0_5",
     half=True
 )
 
 # -----------------------------
-# Lines for Enter & Exit
+# draw line in video
 # -----------------------------
 limitEnter = [700, 300, 900, 700]  # line Enter
 limitExit = [600, 300, 700, 600]   # line Exit
@@ -71,24 +69,7 @@ total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 print(f"Total frames to process: {total_frames}")
 
 # -----------------------------
-# Active Status Dictionary + Trajectories
-# -----------------------------
-active_status = {}
-trajectories = {}
-
-# -----------------------------
-# CSV Logging
-# -----------------------------
-csv_file = "tracking_log.csv"
-csv_fields = ["frame", "track_id", "x1", "y1", "x2", "y2", "cx", "cy", "status"]
-if os.path.exists(csv_file):
-    os.remove(csv_file)
-with open(csv_file, mode="w", newline="") as f:
-    writer = csv.writer(f)
-    writer.writerow(csv_fields)
-
-# -----------------------------
-# Process video
+# open cam
 # -----------------------------
 while cap.isOpened():
     success, frame = cap.read()
@@ -99,7 +80,7 @@ while cap.isOpened():
     frame_count += 1
     if frame_count % 30 == 0:
         progress = (frame_count / total_frames) * 100 if total_frames > 0 else 0
-
+        print(f"Processing frame {frame_count}/{total_frames} ({progress:.1f}%)")
 
     results = model(frame, classes=[0], verbose=False)
     detections = []
@@ -110,21 +91,20 @@ while cap.isOpened():
             cls = int(box.cls[0])
             x1, y1, x2, y2 = map(int, box.xyxy[0])
 
-            if cls == 0 and conf > 0.5:
-                # check ignore zone
-                if (ignore_zone[0] <= x1 and x2 <= ignore_zone[2] and
-                    ignore_zone[1] <= y1 and y2 <= ignore_zone[3]):
-                    continue
+            if cls == 0 and conf > 0.4:  # شخص
+                if (ignore_zone[0] <= x1 <= ignore_zone[2] and
+                    ignore_zone[1] <= y1 <= ignore_zone[3]):
+                    continue  # Cutting  a part  in Video
 
                 detections.append([[x1, y1, x2 - x1, y2 - y1], conf, "person"])
 
     # -----------------------------
-    # DeepSORT Tracking
+    # DeepSORT Tracking with Re-ID
     # -----------------------------
     tracks = tracker.update_tracks(detections, frame=frame)
 
     # -----------------------------
-    # Draw lines
+    # Draw line in Video
     # -----------------------------
     cv2.line(frame, (limitEnter[0], limitEnter[1]), (limitEnter[2], limitEnter[3]), (0, 255, 0), 2)
     cv2.line(frame, (limitExit[0], limitExit[1]), (limitExit[2], limitExit[3]), (0, 0, 255), 2)
@@ -134,39 +114,30 @@ while cap.isOpened():
             continue
 
         track_id = track.track_id
-        active_status[track_id] = "Active"
-
         Ltrb = track.to_ltrb()
         x1, y1, x2, y2 = map(int, Ltrb)
+
         cx = (x1 + x2) // 2
         cy = (y1 + y2) // 2
-
         if track_id not in id_colors:
             id_colors[track_id] = (
                 random.randint(0, 255),
                 random.randint(0, 255),
                 random.randint(0, 255)
             )
+
         color = id_colors[track_id]
 
-        # Draw bbox with transparency
-        mask = frame.copy()
-        cv2.rectangle(mask, (x1, y1), (x2, y2), color, -1)
-        frame = cv2.addWeighted(mask, 0.2, frame, 0.8, 0)
-
-        # Label
+        # Draw Box in person
+        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 3)
         cv2.putText(frame, f"ID {track_id}", (x1, y1 - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
+
         cv2.circle(frame, (cx, cy), 5, color, -1)
 
-        # Trajectory
-        if track_id not in trajectories:
-            trajectories[track_id] = []
-        trajectories[track_id].append((cx, cy))
-        for point in trajectories[track_id]:
-            cv2.circle(frame, point, 2, color, -1)
-
-        # Count Enter / Exit
+        # -----------------------------
+        # Calc
+        # -----------------------------
         if limitEnter[0] < cx < limitEnter[2] and limitEnter[1] < cy < limitEnter[3]:
             if track_id not in CounttrackEnter:
                 CounttrackEnter.append(track_id)
@@ -175,20 +146,13 @@ while cap.isOpened():
             if track_id not in counttrackExit:
                 counttrackExit.append(track_id)
 
-
     # -----------------------------
-    # Show counters
+    # show counter in video
     # -----------------------------
     cv2.putText(frame, f"Enter: {len(CounttrackEnter)}", (50, 50),
                 cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
     cv2.putText(frame, f"Exit: {len(counttrackExit)}", (50, 100),
                 cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-
-    active_count = sum(1 for track in tracks if track.is_confirmed() and track.time_since_update == 0)
-    cv2.putText(frame, f"Active: {active_count}", (50, 150),
-                cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 0), 2)
-
-
 
     video_writer.write(frame)
     # cv2.imshow("YOLO + DeepSORT Tracking", frame)
