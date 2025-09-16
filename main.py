@@ -14,7 +14,7 @@ print("Model loaded!")
 # -----------------------------
 # Video Path
 # -----------------------------
-video_path = "/content/WhatsApp Video 2025-09-16 at 00.04.31.mp4"
+video_path = "/content/ahmed.mp4"
 cap = cv2.VideoCapture(video_path)
 
 # -----------------------------
@@ -28,7 +28,7 @@ w, h, fps = (int(cap.get(x)) for x in (
 if fps <= 0:
     fps = 30
 
-video_writer = cv2.VideoWriter("person_bytetrack_dwell_heatmap.mp4",
+video_writer = cv2.VideoWriter("person_bytetrack_dwell_heatmap_natural.mp4",
                                cv2.VideoWriter_fourcc(*"mp4v"),
                                fps, (w, h))
 
@@ -40,22 +40,20 @@ if not video_writer.isOpened():
 # ID Colors + Dwell Time
 # -----------------------------
 id_colors = {}
-id_entry_time = {}   # ID -> entry timestamp
-id_dwell_time = {}   # ID -> dwell time in seconds
+id_entry_time = {}
+id_dwell_time = {}
 
-# Heatmap
+# Heatmap (float32 للتراكُم)
 accumulated_heatmap = np.zeros((h, w), dtype=np.float32)
 
 # -----------------------------
 # Ignore Zones (rotated rectangles)
 # -----------------------------
-# point zone
-rot_rect1 = ((426, 270), (150, 350), 3) # (x1, y1, x2, y2)
+rot_rect1 = ((426, 270), (150, 350), 3)
 rot_rect2 = ((750, 240), (170, 400), -13)
 
 zone1 = cv2.boxPoints(rot_rect1).astype(int)
 zone2 = cv2.boxPoints(rot_rect2).astype(int)
-
 
 # -----------------------------
 # Run YOLO + ByteTrack
@@ -71,10 +69,6 @@ for frame_result in results:
     frame = frame_result.orig_img.copy()
     current_time = time.time()
 
-    # draw zone
-    # cv2.polylines(frame, [zone1], isClosed=True, color=(0, 255, 0), thickness=2)
-    # cv2.polylines(frame, [zone2], isClosed=True, color=(255, 0, 0), thickness=2)
-
     if frame_result.boxes is not None:
         for box in frame_result.boxes:
             x1, y1, x2, y2 = map(int, box.xyxy[0])
@@ -86,7 +80,7 @@ for frame_result in results:
             cx = (x1 + x2) // 2
             cy = (y1 + y2) // 2
 
-
+            # Ignore points in forbidden zones
             if cv2.pointPolygonTest(zone1, (cx, cy), False) >= 0 or \
                cv2.pointPolygonTest(zone2, (cx, cy), False) >= 0:
                 continue
@@ -119,26 +113,33 @@ for frame_result in results:
             cv2.putText(frame, dwell_text, (x1, y1 - 10),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
-            # Heatmap update (center only once)
-            if elapsed == 0:
-                cv2.circle(accumulated_heatmap, (cx, cy), 10, (1), -1)
+            # Heatmap update لكل حركة
+            # القيمة الصغيرة تتجمع مع مرور الوقت → الأماكن الأكثر مرور تظهر بوضوح
+            # cv2.circle(accumulated_heatmap, (cx, cy), 15, 0.05, -1)
+            cv2.circle(accumulated_heatmap, (cx, cy), 15, 0.1, -1)
 
+
+    # -----------------------------
     # Heatmap visualization
+    # -----------------------------
     norm_heatmap = cv2.normalize(accumulated_heatmap, None, 0, 255, cv2.NORM_MINMAX)
     heatmap_color = cv2.applyColorMap(norm_heatmap.astype(np.uint8), cv2.COLORMAP_JET)
-    overlay = cv2.addWeighted(frame, 0.85, heatmap_color, 0.15, 0)
+
+    # تخفيف قوة ألوان الهيت ماب
+    heatmap_faded = cv2.convertScaleAbs(heatmap_color, alpha=0.6, beta=0)
+
+    # دمج طبيعي مع الفيديو بدون ما يطغى على الإضاءة
+    overlay = cv2.addWeighted(frame, 0.85, heatmap_faded, 0.15, 0)
+
 
     video_writer.write(overlay)
-    # cv2.imshow("Tracking", overlay)
-    # if cv2.waitKey(1) & 0xFF == ord('q'):
-    #     break
 
 cap.release()
 video_writer.release()
 cv2.destroyAllWindows()
 
 print("Processing Complete!")
-print("Output saved as: person_bytetrack_dwell_heatmap.mp4")
+print("Output saved as: person_bytetrack_dwell_heatmap_natural.mp4")
 
 # Print summary dwell times
 print("\nFinal Dwell Times (min:sec):")
