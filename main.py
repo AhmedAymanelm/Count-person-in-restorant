@@ -116,7 +116,7 @@ for frame_result in results:
     norm_heatmap = cv2.normalize(accumulated_heatmap, None, 0, 255, cv2.NORM_MINMAX)
     heatmap_color = cv2.applyColorMap(norm_heatmap.astype(np.uint8), cv2.COLORMAP_JET)
 
-    # Blend heatmap مع الفريم (أهدى شوية)
+    # Blend heatmap 
     overlay = cv2.addWeighted(frame, 0.85, heatmap_color, 0.15, 0)
 
     video_writer.write(overlay)
