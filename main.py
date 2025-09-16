@@ -43,8 +43,19 @@ id_colors = {}
 id_entry_time = {}   # ID -> entry timestamp
 id_dwell_time = {}   # ID -> dwell time in seconds
 
-# Heatmap متراكم
+# Heatmap
 accumulated_heatmap = np.zeros((h, w), dtype=np.float32)
+
+# -----------------------------
+# Ignore Zones (rotated rectangles)
+# -----------------------------
+# point zone
+rot_rect1 = ((426, 270), (150, 350), 3) # (x1, y1, x2, y2)
+rot_rect2 = ((750, 240), (170, 400), -13)
+
+zone1 = cv2.boxPoints(rot_rect1).astype(int)
+zone2 = cv2.boxPoints(rot_rect2).astype(int)
+
 
 # -----------------------------
 # Run YOLO + ByteTrack
@@ -60,6 +71,10 @@ for frame_result in results:
     frame = frame_result.orig_img.copy()
     current_time = time.time()
 
+    # draw zone
+    # cv2.polylines(frame, [zone1], isClosed=True, color=(0, 255, 0), thickness=2)
+    # cv2.polylines(frame, [zone2], isClosed=True, color=(255, 0, 0), thickness=2)
+
     if frame_result.boxes is not None:
         for box in frame_result.boxes:
             x1, y1, x2, y2 = map(int, box.xyxy[0])
@@ -68,58 +83,55 @@ for frame_result in results:
             if track_id == -1:
                 continue
 
+            cx = (x1 + x2) // 2
+            cy = (y1 + y2) // 2
+
+
+            if cv2.pointPolygonTest(zone1, (cx, cy), False) >= 0 or \
+               cv2.pointPolygonTest(zone2, (cx, cy), False) >= 0:
+                continue
+
             # Assign random color for ID
             if track_id not in id_colors:
                 id_colors[track_id] = (random.randint(0, 255),
                                        random.randint(0, 255),
                                        random.randint(0, 255))
 
-            # Track dwell time (seconds)
+            # Track dwell time
             if track_id not in id_entry_time:
                 id_entry_time[track_id] = current_time
 
             elapsed = int(current_time - id_entry_time[track_id])
             id_dwell_time[track_id] = elapsed
 
-            # تحويل للعرض بالدقايق + ثواني
             minutes = elapsed // 60
             seconds = elapsed % 60
-            if minutes > 0:
-                dwell_text = f"ID {track_id} | {minutes}m {seconds}s"
-            else:
-                dwell_text = f"ID {track_id} | {seconds}s"
+            dwell_text = f"ID {track_id} | {minutes}m {seconds}s" if minutes > 0 else f"ID {track_id} | {seconds}s"
 
             color = id_colors[track_id]
 
-            # -----------------------------
-            # Draw Transparent Square
-            # -----------------------------
+            # Transparent box
             overlay = frame.copy()
             cv2.rectangle(overlay, (x1, y1), (x2, y2), color, -1)
             frame = cv2.addWeighted(overlay, 0.3, frame, 0.7, 0)
 
-            # Put ID + dwell time
-            cv2.putText(frame,
-                        dwell_text,
-                        (x1, y1 - 10),
+            # Label
+            cv2.putText(frame, dwell_text, (x1, y1 - 10),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
-            # -----------------------------
-            # Update Heatmap (center only once at start)
-            # -----------------------------
+            # Heatmap update (center only once)
             if elapsed == 0:
-                cx = (x1 + x2) // 2
-                cy = (y1 + y2) // 2
                 cv2.circle(accumulated_heatmap, (cx, cy), 10, (1), -1)
 
-    # Normalize heatmap and apply colormap
+    # Heatmap visualization
     norm_heatmap = cv2.normalize(accumulated_heatmap, None, 0, 255, cv2.NORM_MINMAX)
     heatmap_color = cv2.applyColorMap(norm_heatmap.astype(np.uint8), cv2.COLORMAP_JET)
-
-    # Blend heatmap 
     overlay = cv2.addWeighted(frame, 0.85, heatmap_color, 0.15, 0)
 
     video_writer.write(overlay)
+    # cv2.imshow("Tracking", overlay)
+    # if cv2.waitKey(1) & 0xFF == ord('q'):
+    #     break
 
 cap.release()
 video_writer.release()
