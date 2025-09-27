@@ -148,6 +148,8 @@ The CSV file contains the following columns:
 - **Accuracy**: High accuracy with YOLO11x + DeepSORT
 - **Scalability**: Configurable for different video resolutions
 
+- File Gender and age [here] : https://drive.google.com/drive/folders/11GqrrHvK_isKcMwpEpNcOldj3VkweApk
+
 ## 🔮 Future Enhancements
 
 - [ ] Real-time webcam support
